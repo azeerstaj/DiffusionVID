@@ -8,7 +8,6 @@
 #include <torch/serialize/tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <vector>
-#include <THC/THC.h>
 
 #define CHECK_INPUT(x) CHECK_CUDA(x);CHECK_CONTIGUOUS(x)
 
