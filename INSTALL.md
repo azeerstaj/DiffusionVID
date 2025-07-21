@@ -64,6 +64,11 @@ cd <your install dir>
 export INSTALL_DIR=$PWD
 
 # install detectron2:
+export CC=gcc
+export CXX=g++
+export CFLAGS="-O3"
+export CXXFLAGS="-O3"
+
 cd $INSTALL_DIR
 git clone https://github.com/facebookresearch/detectron2.git
 python -m pip install -e detectron2
