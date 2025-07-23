@@ -80,10 +80,12 @@ cd cityscapesScripts/
 python setup.py build_ext install
 
 # install apex (skip when you use nvcr docker)
+# git clone https://github.com/NVIDIA/apex.git
+# cd apex
 cd $INSTALL_DIR
-git clone https://github.com/NVIDIA/apex.git
-cd apex
-python setup.py install --cuda_ext --cpp_ext
+git clone --branch 22.04-dev https://github.com/NVIDIA/apex apex-22.04
+cd apex-22.04
+pip install -v --disable-pip-version-check --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./
 
 # clone our lib:
 cd $INSTALL_DIR

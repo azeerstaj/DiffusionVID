@@ -11,6 +11,7 @@ dist/
 *.pth
 *.pkl
 *.npy
+*.zip
 
 # ipython/jupyter notebooks
 *.ipynb
@@ -34,3 +35,5 @@ dist/
 # project dirs
 models/
 visualizations/
+visualization/
+datasets/

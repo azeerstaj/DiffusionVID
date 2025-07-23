@@ -23,6 +23,13 @@ def compute_on_dataset(model, data_loader, device, bbox_aug, method, timer=None,
     model.eval()
     results_dict = {}
     cpu_device = torch.device("cpu")
+    # print("\n\n\n\n[compute_on_dataset]")
+    # print("Images Len:", len(data_loader.dataset))
+    # print("Images Type:", type(data_loader.dataset))
+    # print("Images Type:", type(images))
+    # print("Targets Len:", len(targets))
+    # print("Targets Type:", type(targets))
+    # print("[compute_on_dataset]\n\n\n\n")
     for i, batch in enumerate(tqdm(data_loader)):
         images, targets, image_ids = batch
         with torch.no_grad():

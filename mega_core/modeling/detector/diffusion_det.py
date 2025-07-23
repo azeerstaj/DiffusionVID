@@ -192,6 +192,9 @@ class DiffusionDet(nn.Module):
 
     def __init__(self, cfg):
         super(DiffusionDet, self).__init__()
+        print("-" * 20)
+        print("Building DiffusionDet ...")
+        print("-" * 20)
         self.device = cfg.MODEL.DEVICE
 
         self.global_enable = cfg.MODEL.VID.MEGA.GLOBAL.ENABLE

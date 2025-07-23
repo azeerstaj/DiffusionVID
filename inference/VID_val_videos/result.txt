@@ -1,0 +1,35 @@
+AP50 | motion=   all = 0.0032
+Category AP:
+airplane        : nan
+antelope        : nan
+bear            : nan
+bicycle         : nan
+bird            : nan
+bus             : nan
+car             : nan
+cattle          : nan
+dog             : nan
+domestic_cat    : nan
+elephant        : nan
+fox             : nan
+giant_panda     : nan
+hamster         : nan
+horse           : 0.0032
+lion            : nan
+lizard          : nan
+monkey          : nan
+motorcycle      : nan
+rabbit          : nan
+red_panda       : nan
+sheep           : nan
+snake           : nan
+squirrel        : nan
+tiger           : nan
+train           : nan
+turtle          : nan
+watercraft      : nan
+whale           : nan
+zebra           : nan
+Mean CorLoc: 0.0000
+Category CorLoc:
+horse           : 0.0000

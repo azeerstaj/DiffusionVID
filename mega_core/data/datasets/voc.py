@@ -65,7 +65,7 @@ class PascalVOCDataset(torch.utils.data.Dataset):
 
         target = self.get_groundtruth(index)
         target = target.clip_to_image(remove_empty=True)
-
+        # target.type = "cur"
         if self.transforms is not None:
             img, target = self.transforms(img, target)
 

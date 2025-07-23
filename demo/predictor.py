@@ -22,6 +22,8 @@ from cv2 import (CAP_PROP_FRAME_WIDTH, CAP_PROP_FRAME_HEIGHT, CAP_PROP_FPS,
                  CAP_PROP_FRAME_COUNT, CAP_PROP_FOURCC,
                  CAP_PROP_POS_FRAMES, VideoWriter_fourcc)
 
+# from PIL import Image
+import PIL
 
 class Cache(object):
 
@@ -332,6 +334,7 @@ class VIDDemo(object):
         self.model = build_detection_model(cfg)
         self.model.eval()
         self.device = torch.device(cfg.MODEL.DEVICE)
+        # print("\n\n\nUsing device:", self.device, "\n\n\n")
         self.model.to(self.device)
 
         save_dir = cfg.OUTPUT_DIR
@@ -542,6 +545,7 @@ class VIDDemo(object):
                     # get anotation (GT) information
                     anno_filename = image_names[frame_id].replace('/Data/', '/Annotations/').replace('.JPEG', '.xml')
                     if os.path.exists(anno_filename):
+                        print("Loading annotation from {}".format(anno_filename))
                         tree = ET.parse(anno_filename).getroot()
                         anno = self._preprocess_annotation(tree)
                         height, width = anno["im_info"]
@@ -652,7 +656,19 @@ class VIDDemo(object):
 
         result = image.copy()
         result = self.overlay_boxes(result, top_predictions)
-        result = self.overlay_class_names(result, top_predictions)
+        result = self.overlay_class_names(result, top_predictions) # image with boxes and class names
+        print("-" * 50)
+        print(predictions)
+        print(top_predictions)
+        # print(result)
+        print("-" * 50)
+
+        debug_dir = "debug_outputs"
+        os.makedirs(debug_dir, exist_ok=True)
+        debug_path = os.path.join(debug_dir, "debug_annotated.jpg")
+        PIL.Image.fromarray(result).save(debug_path)
+        print(f"Saved annotated image to: {debug_path}")
+
         if False:
             from matplotlib import pyplot as plt
             from PIL import Image
@@ -736,6 +752,8 @@ class VIDDemo(object):
                 the BoxList via `prediction.fields()`
         """
         scores = predictions.get_field("scores")
+        # print("[select_top_predictions] scores:", scores)
+        print("[select_top_predictions] self.confidence_threshold:", self.confidence_threshold)
         keep = torch.nonzero(scores > self.confidence_threshold).squeeze(1)
         predictions = predictions[keep]
         scores = predictions.get_field("scores")

@@ -78,7 +78,7 @@ args.output_folder = args.output_folder + '/' + cfg.MODEL.VID.METHOD + '/' + mod
 vid_demo = VIDDemo(
     cfg,
     method=cfg.MODEL.VID.METHOD,
-    confidence_threshold=0.3,
+    confidence_threshold=0.5,
     output_folder=args.output_folder
 )
 

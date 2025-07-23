@@ -53,8 +53,14 @@ class VIDDataset(torch.utils.data.Dataset):
         self._img_dir = os.path.join(self.img_dir, "%s.JPEG")
         self._anno_path = os.path.join(self.anno_path, "%s.xml")
 
+        print("\n\n\n\n[VIDDataset] image_set:", self.image_set)
+        print("[VIDDataset] img_index:", self.img_index)
         with open(self.img_index) as f:
             lines = [x.strip().split(" ") for x in f.readlines()]
+
+        print("LINES[0]:", lines[0])
+        print("len(LINES):", len(lines), "\n\n\n\n")
+
         if len(lines[0]) == 2:
             self.image_set_index = [x[0] for x in lines]
             self.frame_id = [int(x[1]) for x in lines]
@@ -175,7 +181,7 @@ class VIDDataset(torch.utils.data.Dataset):
         else:
             annos = []
             for idx in range(len(self)):
-                if idx % 10000 == 0:
+                if idx % 100 == 0:
                     print("Had processed {} images".format(idx))
 
                 filename = self.image_set_index[idx]
@@ -193,6 +199,8 @@ class VIDDataset(torch.utils.data.Dataset):
         return annos
 
     def get_img_info(self, idx):
+        # print("[get_img_info] idx:", idx)
+        # print("[get_img_info] len(annos):", len(self.annos))
         im_info = self.annos[idx]["im_info"]
         return {"height": im_info[0], "width": im_info[1]}
 

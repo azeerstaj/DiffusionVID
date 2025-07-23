@@ -134,6 +134,9 @@ def _rename_weights_for_resnet(weights, stage_names):
 
 def _load_c2_pickled_weights(file_path):
     with open(file_path, "rb") as f:
+        data = pickle.load(f, encoding="latin1")
+        
+        """
         PY3 = False
         PY37 = False
         if 'PY3' in dir(torch._six):
@@ -144,6 +147,7 @@ def _load_c2_pickled_weights(file_path):
             data = pickle.load(f, encoding="latin1")
         else:
             data = pickle.load(f)
+        """
     if "blobs" in data:
         weights = data["blobs"]
     else:
@@ -165,7 +169,7 @@ def _rename_conv_weights_for_deformable_conv_layers(state_dict, cfg):
             if r is None:
                 continue
             for param in ["weight", "bias"]:
-                if old_key.find(param) is -1:
+                if old_key.find(param) == -1:
                     continue
                 new_key = old_key.replace(
                     "conv2.{}".format(param), "conv2.conv.{}".format(param)
@@ -202,9 +206,11 @@ def load_resnet_c2_format(cfg, f):
     conv_body = cfg.MODEL.BACKBONE.CONV_BODY
     arch = conv_body.replace("-C4", "").replace("-C5", "").replace("-FPN", "")
     arch = arch.replace("-RETINANET", "")
+    print("[load_c2_format] arch:", arch)
     if "torchvision" in arch:
         arch = arch.replace("-torchvision", "")
         state_dict = state_dict['model']
+        print("State Dict:", "\n".join(list(state_dict.keys())))
     else:
         stages = _C2_STAGE_NAMES[arch]
         state_dict = _rename_weights_for_resnet(state_dict, stages)
@@ -216,4 +222,5 @@ def load_resnet_c2_format(cfg, f):
 
 
 def load_c2_format(cfg, f):
+    print("[load_c2_format] Backbone:", cfg.MODEL.BACKBONE.CONV_BODY)
     return C2_FORMAT_LOADER[cfg.MODEL.BACKBONE.CONV_BODY](cfg, f)

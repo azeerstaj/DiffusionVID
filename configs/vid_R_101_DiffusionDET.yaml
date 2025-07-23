@@ -69,7 +69,8 @@ DATALOADER:
   NUM_WORKERS: 16  # 1 for debug
 DATASETS:
   TRAIN: ("DET_train_30classes", "VID_train_15frames")
-  TEST: ("VID_val_videos",) # ("VID_val_videos",) # ("YouTube_Objects",)
+  # TEST: ("VID_val_videos",) # ("VID_val_videos",) # ("YouTube_Objects",)
+  TEST: ("coco_2017_val",) # ("VID_val_videos",) # ("YouTube_Objects",)
 INPUT:
   PIXEL_MEAN: [ 123.675, 116.280, 103.530 ] # RGB
   PIXEL_STD: [ 58.395, 57.120, 57.375 ]
