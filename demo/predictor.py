@@ -5,12 +5,17 @@ import os
 import tempfile
 from collections import OrderedDict
 from tqdm import tqdm
+
 import torch
 from torchvision import transforms as T
 from torchvision.transforms import functional as F
+from torch.profiler import profile, ProfilerActivity, record_function
+
+
 from mega_core.modeling.detector import build_detection_model
 from mega_core.utils.checkpoint import DetectronCheckpointer
 from mega_core.structures.image_list import to_image_list
+
 import sys
 if sys.version_info[0] == 2:
     import xml.etree.cElementTree as ET
@@ -334,7 +339,6 @@ class VIDDemo(object):
         self.model = build_detection_model(cfg)
         self.model.eval()
         self.device = torch.device(cfg.MODEL.DEVICE)
-        # print("\n\n\nUsing device:", self.device, "\n\n\n")
         self.model.to(self.device)
 
         save_dir = cfg.OUTPUT_DIR
@@ -426,24 +430,37 @@ class VIDDemo(object):
         return image_list
 
     def run_on_image_folder(self, image_folder, suffix='.JPEG', track_refs=False, start_frame=0):
+        
+        # Get all the frames.
         image_names = glob.glob(image_folder + '/*' + suffix)
+
+        # Sort the frames in ascending order.
         image_names = sorted(image_names)
+        
+        # Get image frames i.e 0000, 00001 ...
         image_set_index = [i.split(suffix)[0] for i in image_names]
+
+        # From which frame do we start, 0, 10, 1 .. ?
         start_id = int(image_set_index[0].split("/")[-1])
 
         img_dir = "%s" + suffix
+        
+        # Total frames to process
         frame_seg_len = len(image_names)
         pattern = image_folder + "/%06d"
 
+        # Output Images
         images_with_boxes = []
+
         # preparation for visualization
         self.model.demo = True
         if self.method != 'diffusion':
             self.model.roi_heads.box.feature_extractor.demo = True
-        self.model.features_all = []
-        self.model.proposals_all = []
-        self.affines = []
-        self.contributors = []
+
+        self.model.features_all = []    # What features? Buffer? Cur Image ?
+        self.model.proposals_all = []   # 
+        self.affines = []               # What affines ?
+        self.contributors = []          # Contributes to what?
         self.l2_norms = []
         self.l2_norms_key = []
         self.proposals_global = []
@@ -456,28 +473,52 @@ class VIDDemo(object):
         pil_transform = self.build_pil_transform()
         shuffled_indices = []
         start = start_frame  # start frame num.of the video
+        
+        # Parallelizable ?
+        # pragma unroll
         for idx in tqdm(range(start, frame_seg_len)):
+            
+            # Read the current image
             original_image = cv2.imread(image_names[idx])
+
+            # Get current image id
             frame_id = int(image_set_index[idx].split("/")[-1])
+
+            # Transform current image
             img_cur = self.perform_transform(original_image)
+
+            # If it is base method process it directly, if not we need a buffer.
             if self.method == "base":
                 image_with_boxes, _ = self.run_on_image(original_image, img_cur)
                 images_with_boxes.append(image_with_boxes)
+
             elif self.method in ("dff", "fgfa", "rdn", "mega", "dafa", "diffusion"):
                 infos = {}
+                # Current frame
                 infos["cur"] = img_cur
+                # Total frames
                 infos["seg_len"] = frame_seg_len
+                # Frame representation
                 infos["pattern"] = pattern
+                # Frame directory
                 infos["img_dir"] = img_dir
+                # Transformation functoin
                 infos["transforms"] = pil_transform
-
+                # Current frame id
                 infos["frame_id"] = frame_id
+                # First frame id
                 infos["start_id"] = start  # dir id of the first frame of video
+                # We have 2 categories either 1st frame of the clip or not:w
                 infos["frame_category"] = 0 if idx == infos["start_id"] else 1
+                # Last frame id
                 infos["end_id"] = frame_seg_len - 1  # dir id of the last frame of video
+                
+                # The upper limit of our local buffer
                 ref_id_final = min(frame_id + self.cfg.MODEL.VID.MEGA.MAX_OFFSET, frame_seg_len - 1)
                 infos["last_queue_id"] = ref_id_final
 
+                # These branches are not important \
+                # because we dont use them.
                 if self.method == "dff":
                     infos["is_key_frame"] = True if frame_id % 10 == 0 else False
                 elif self.method in ("fgfa", "rdn"):
@@ -494,36 +535,38 @@ class VIDDemo(object):
 
                     infos["ref"] = img_refs
                     targets = None
+
                 elif self.method in ["mega", "dafa", "diffusion"]:
+
+                    # Local image buffer
                     img_refs_l = []
-                    '''
-                    # reading other images of the queue (not necessary to be the last one, but last one here)
-                    ref_id = min(frame_seg_len - 1, frame_id + self.cfg.MODEL.VID.MEGA.MAX_OFFSET)
-                    ref_filename = pattern % ref_id
-                    img_ref = cv2.imread(img_dir % ref_filename)
-                    img_ref = self.perform_transform(img_ref)
-                    img_refs_l.append(img_ref)
-                    '''
+
                     # only supports ImageNet VID
                     # read prev & future frames (max size)
                     ref_id_final = min(frame_id + self.cfg.MODEL.VID.MEGA.MAX_OFFSET, frame_seg_len - 1)
+                    print(f"[run_on_image_folder] max_offset: {self.cfg.MODEL.VID.MEGA.MAX_OFFSET}")
+                    
+                    # Determining from where the local buffer should start
                     if infos["frame_category"] == 0:
                         size_local = self.cfg.MODEL.VID.MEGA.ALL_FRAME_INTERVAL - self.cfg.MODEL.VID.MEGA.KEY_FRAME_LOCATION - 1
-                        assert size_local == self.cfg.MODEL.VID.MEGA.MAX_OFFSET
+                        assert size_local == self.cfg.MODEL.VID.MEGA.MAX_OFFSET, f"size_local:{size_local}, MAX_OFFSET:{self.cfg.MODEL.VID.MEGA.MAX_OFFSET}"
                         ref_id_start = max(ref_id_final - self.cfg.MODEL.VID.MEGA.ALL_FRAME_INTERVAL + 1, 0)
                     else:
-                        filename_prev = image_set_index[idx - 1]
+                        filename_prev = image_set_index[idx - 1] # 
                         frame_id_prev = int(filename_prev.split("/")[-1])
                         frame_diff = frame_id - frame_id_prev
                         num_ref = min(frame_diff, self.cfg.MODEL.VID.MEGA.ALL_FRAME_INTERVAL)
                         ref_id_start = max(ref_id_final - num_ref + 1, start_id)
 
+                    # Populating the local buffer
                     for id in range(ref_id_start, ref_id_final + 1):
                         ref_filename = pattern % id
+                        print(f"[run_on_image_folder] local_filename: {ref_filename}")
                         img_ref = cv2.imread(img_dir % ref_filename)
                         img_ref = self.perform_transform(img_ref)
                         img_refs_l.append(img_ref)
 
+                    # [IMPORTANT] At the starting frame we pass the global buffer
                     img_refs_g = []
                     if self.cfg.MODEL.VID.MEGA.GLOBAL.ENABLE:
                         size = self.cfg.MODEL.VID.MEGA.GLOBAL.SIZE if infos["frame_category"] == 0 else 0
@@ -541,11 +584,16 @@ class VIDDemo(object):
                     infos["ref_l"] = img_refs_l
                     infos["ref_g"] = img_refs_g
                     infos['frame_id_g'] = shuffled_indices
+                    print(f"[run_on_image_folder] frame_id: {frame_id}")
+                    print(f"[run_on_image_folder] ref_id_start, ref_id_final: {ref_id_start}, {ref_id_final}")
+                    print(f"[run_on_image_folder] global buffer length:{len(img_refs_g)}")
+                    print(f"[run_on_image_folder] local buffer length:{len(img_refs_l)}")
+                    print(f"[run_on_image_folder] frame category:{infos['frame_category']}")
 
+                    # we dont really need
                     # get anotation (GT) information
                     anno_filename = image_names[frame_id].replace('/Data/', '/Annotations/').replace('.JPEG', '.xml')
                     if os.path.exists(anno_filename):
-                        print("Loading annotation from {}".format(anno_filename))
                         tree = ET.parse(anno_filename).getroot()
                         anno = self._preprocess_annotation(tree)
                         height, width = anno["im_info"]
@@ -561,11 +609,6 @@ class VIDDemo(object):
 
                 self.model.mem_management_type = 'greedy'
                 image_with_boxes, predictions = self.run_on_image(original_image, infos, targets)
-                '''
-                self.model.mem_management_type = 'queue'
-                image_with_boxes2, predictions2 = self.run_on_image(original_image, infos, targets)
-                self.model.mem_management_type = 'greedy'
-                '''
                 if self.method in ["mega", "dafa"]:
                     self.affines.append(self.model.roi_heads.box.feature_extractor.affine)
                     self.contributors.append(self.model.roi_heads.box.feature_extractor.contributor)  # which ref feature in memory contributes most
@@ -578,10 +621,12 @@ class VIDDemo(object):
                     self.cur_feat.append(self.model.roi_heads.box.cur_feat)
                     self.enhanced_feat.append(self.model.roi_heads.box.enhanced_feat)
                     self.cur_feat_nms_idx.append(self.model.roi_heads.box.cur_feat_nms_idx)
+
                 images_with_boxes.append(image_with_boxes)
                 num_predictions = min(2, len(predictions))
                 score_sort, idx_sort = predictions.extra_fields['scores'].topk(k=num_predictions, largest=True)
                 label_sort = predictions.extra_fields['labels'][idx_sort]
+
                 if self.method in ["dafa"]:
                     feat_idx_nms_sorted = self.cur_feat_nms_idx[-1][idx_sort]
                     cur_feat_sorted = self.cur_feat[-1][feat_idx_nms_sorted]
@@ -610,25 +655,6 @@ class VIDDemo(object):
             else:
                 raise NotImplementedError("method {} is not implemented.".format(self.method))
 
-        from visualizer import plot_histogram, contrib_L2_plots, plot_TSNE
-        if False:
-            mem = self.model.roi_heads.box.feature_extractor.global_cache[0]['feats']
-            mem_selfatten = self.model.roi_heads.box.feature_extractor.update_lm(mem, 1)
-            class_logits, box_regression = self.model.roi_heads.box.predictor(mem_selfatten)
-            _, class_labels = class_logits.max(dim=-1)
-            class_labels = class_labels.cpu().numpy()
-
-            plot_TSNE(self.model.features_all, self.model.proposals_all, mem, class_labels)
-
-
-        #contrib_L2_plots(enhancement_scores, self.l2_norms, 'Classification contribution')
-
-        #contrib_mean = [x.mean(0).mean(0) for x in self.contributions]
-        #contrib_L2_plots(contrib_mean, self.l2_norms, 'Attention contribution')
-        #contrib_L2_plots(contrib_mean, self.l2_norms_key, 'Attention contribution')
-
-        # plot_histogram(contrib_mean, self.l2_norms)
-
         return images_with_boxes
 
     def run_on_video(self, video_path, start_frame=0):
@@ -654,13 +680,13 @@ class VIDDemo(object):
         predictions = self.compute_prediction(image, infos, targets)
         top_predictions = self.select_top_predictions(predictions)
 
+        # Writing boxes on the image
         result = image.copy()
         result = self.overlay_boxes(result, top_predictions)
         result = self.overlay_class_names(result, top_predictions) # image with boxes and class names
         print("-" * 50)
         print(predictions)
         print(top_predictions)
-        # print(result)
         print("-" * 50)
 
         debug_dir = "debug_outputs"
@@ -668,49 +694,6 @@ class VIDDemo(object):
         debug_path = os.path.join(debug_dir, "debug_annotated.jpg")
         PIL.Image.fromarray(result).save(debug_path)
         print(f"Saved annotated image to: {debug_path}")
-
-        if False:
-            from matplotlib import pyplot as plt
-            from PIL import Image
-            # plot cur frame (after)
-            ax = plt.gca()
-            ax.axes.xaxis.set_visible(False)
-            ax.axes.yaxis.set_visible(False)
-            plt.imshow(result, interpolation='nearest')
-            plt.show()
-            # plot cur frame (before)
-            self.model.demo_curbox = self.model.demo_curbox.resize([480, 360])
-            self.model.demo_refbox = self.model.demo_refbox.resize([480, 360])
-            img_cur = image.copy()
-            img_cur = self.overlay_boxes(img_cur, self.model.demo_curbox)
-            img_cur = self.overlay_class_names(img_cur, self.model.demo_curbox)
-            ax = plt.gca()
-            ax.axes.xaxis.set_visible(False)
-            ax.axes.yaxis.set_visible(False)
-            plt.imshow(img_cur, interpolation='nearest')
-            plt.show()
-            # plot ref frame (before)
-            for i in range(len(self.model.demo_refbox)):
-                refbox = self.model.demo_refbox[i:i+1]
-                img_ref = Image.open(infos['img_dir'] % (self.model.demo_imgdir % refbox.get_field("frame_id")[0])).convert("RGB")
-                img_ref = np.array(img_ref)
-                img_ref = self.overlay_boxes(img_ref, refbox)
-                img_ref = self.overlay_atten_score(img_ref, refbox)
-
-                ax = plt.gca()
-                ax.axes.xaxis.set_visible(False)
-                ax.axes.yaxis.set_visible(False)
-                plt.imshow(img_ref, interpolation='nearest')
-                plt.title('ref feat #{}'.format(i+1))
-                plt.show()
-        if False:
-            # print region proposal boxes
-            rpn_result = self.rpn_proposals[:75]
-            rpn_result.bbox = rpn_result.bbox.cpu()
-            rpn_result.extra_fields['scores'] = rpn_result.extra_fields['objectness'].cpu()
-            rpn_result.extra_fields['labels'] = torch.zeros(len(rpn_result), dtype=torch.int64)
-            result = self.overlay_boxes(result, rpn_result)
-            result = self.overlay_class_names(result, rpn_result)
 
         return result, predictions
 
@@ -726,9 +709,22 @@ class VIDDemo(object):
         # compute predictions
         #with torch.cuda.amp.autocast():
             # output is float16 because linear layers autocast to float16.
+
+        # with profile(activities=[ProfilerActivity.CPU]) as prof:
+        #     with record_function("model_inference"):
+        #         with torch.no_grad():
+        #             predictions = self.model(infos, targets)
+                    
+        # print(prof.key_averages().table(sort_by="self_cuda_time_total", row_limit=20))
+        # # prof.export_chrome_trace("trace.json")
+
         with torch.no_grad():
-            predictions = self.model(infos, targets)
+            predictions = self.model(infos, None)
+        
+        # print("[compute_predicton] Length of predictions", len(predictions))
+        # Always seem to be 1 ?
         predictions = [o.to(self.cpu_device) for o in predictions]
+        print("[compute_prediction] Len of predictions:", len(predictions))
 
         # always single image is passed at a time
         prediction = predictions[0]
@@ -753,11 +749,14 @@ class VIDDemo(object):
         """
         scores = predictions.get_field("scores")
         # print("[select_top_predictions] scores:", scores)
-        print("[select_top_predictions] self.confidence_threshold:", self.confidence_threshold)
+        # print("[select_top_predictions] self.confidence_threshold:", self.confidence_threshold)
         keep = torch.nonzero(scores > self.confidence_threshold).squeeze(1)
         predictions = predictions[keep]
         scores = predictions.get_field("scores")
         _, idx = scores.sort(0, descending=False)   # ascending order in order that higher score boxes drawn later
+        print("[select_top_predictions] keep:", keep)
+        print("[select_top_predictions] idx:", idx)
+        print("[select_top_predictions] scores:", scores)
         return predictions[idx]
 
     def compute_colors_for_labels(self, labels):

@@ -12,6 +12,8 @@ dist/
 *.pkl
 *.npy
 *.zip
+*.log
+trace*
 
 # ipython/jupyter notebooks
 *.ipynb
@@ -37,3 +39,7 @@ models/
 visualizations/
 visualization/
 datasets/
+
+# Profiler
+*.nsys*
+*.sqlite

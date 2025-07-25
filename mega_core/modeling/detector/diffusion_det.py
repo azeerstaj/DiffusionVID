@@ -186,6 +186,8 @@ def add_diffusiondet_config(cfg):
     '''
 
 class DiffusionDet(nn.Module):
+    
+    # Sparse RCNN ??
     """
     Main class for Sparse R-CNN.
     """
@@ -215,7 +217,6 @@ class DiffusionDet(nn.Module):
         self.num_proposals = cfg.MODEL.DiffusionDet.NUM_PROPOSALS
         self.hidden_dim = cfg.MODEL.DiffusionDet.HIDDEN_DIM
         self.num_heads = cfg.MODEL.DiffusionDet.NUM_HEADS
-
         self.infer_batch = cfg.INPUT.INFER_BATCH
 
         # Build Backbone.
@@ -322,6 +323,12 @@ class DiffusionDet(nn.Module):
         if self.training and targets is None:
             raise ValueError("In training mode, targets should be passed")
 
+        # print("[forward] infos[ref_l][0].shape", images['ref_l'][0].shape)
+        # print("[forward] infos[ref_g][0].shape", images['ref_g'][0].shape)
+        print("[forward] cur_image.shape", images['cur'].tensors.shape)
+        print("[forward] ref_l[0].shape", images['ref_l'][0].tensors.shape)
+        # print("[forward] ref_g[0].shape", images['ref_g'][0].tensors.shape)
+
         if self.training:
             images["cur"] = to_image_list(images["cur"])
             images["ref_l"] = [to_image_list(image) for image in images["ref_l"]]
@@ -330,8 +337,11 @@ class DiffusionDet(nn.Module):
 
             return self._forward_train(images["cur"], images["ref_l"], images["ref_m"], images["ref_g"], targets)
         else:
+            # Current frame
             images["cur"] = to_image_list(images["cur"])
+            # Local buffer
             images["ref_l"] = [to_image_list(image) for image in images["ref_l"]]
+            # Global buffer
             images["ref_g"] = [to_image_list(image) for image in images["ref_g"]]
 
             infos = images.copy()
@@ -388,6 +398,8 @@ class DiffusionDet(nn.Module):
         if targets is not None and not self.demo:
             raise ValueError("In testing mode, targets should be None")
 
+        print("[forward] len(infos[ref_l])", len(infos['ref_l']))
+        print("[forward] len(infos[ref_g])", len(infos['ref_g']))
         # initialization
         if infos["frame_category"] == 0:  # a new video
             self.local_img_queue = []
@@ -419,16 +431,30 @@ class DiffusionDet(nn.Module):
 
         # 1. extract features
         if infos["ref_l"] or infos["ref_g"]:
+
             local_imgs = [img.tensors for img in infos["ref_l"]]
             global_imgs = [img.tensors for img in infos["ref_g"]]
+            print(f"[forward] Local  Images Len: {len(local_imgs)}")
+            print(f"[forward] Global Images Len: {len(global_imgs)}")
+
             total_imgs_tensor = torch.cat(local_imgs + global_imgs)
+            print(f"[forward] total_imgs_tensor.shape: {total_imgs_tensor.shape}")
+
             total_imgs_tensor = self.normalizer(total_imgs_tensor)
             batch_split = self.infer_batch
             total_imgs_splits = total_imgs_tensor.split(batch_split)
+            print(f"[forward] batchs_plit: {batch_split}")
+            print(f"[forward] len(total_images_split): {len(total_imgs_splits)}")
+            print(f"[forward] total_imgs_splits[0].shape: {total_imgs_splits[0].shape}")
+
             total_feats_split = []
             for imgs_split in total_imgs_splits:
                 feats = self.backbone(imgs_split)
                 total_feats_split.append(feats)
+
+            print(f"[forward] len(total_feats_split): {len(total_feats_split)}")
+            print(f"[forward] total_feats_split[0].shape: {total_feats_split[0].keys()}")
+
             total_feats, feats_l, feats_g = {}, {}, {}
             len_l, len_g = len(local_imgs), (global_imgs)
             for p in self.in_features:
