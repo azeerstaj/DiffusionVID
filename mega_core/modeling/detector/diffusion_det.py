@@ -367,6 +367,8 @@ class DiffusionDet(nn.Module):
             self.proposals_feat_dis = deque(maxlen=self.all_frame_interval)
             self.proposals_feat_300 = deque(maxlen=self.all_frame_interval)
 
+
+        print("[forward] All frame interval:", self.all_frame_interval)
         # get frame info
         self.frame_id = infos["frame_id"]  # dir id of the current frame
         self.start_id = infos["start_id"]  # dir id of the first frame of video
@@ -484,6 +486,7 @@ class DiffusionDet(nn.Module):
             fill_idx = range(len(local_imgs))
 
         # fill sampled local features queue
+        print("[forward] Fill Idx:", fill_idx)
         for i in fill_idx:
             frame_feat = []
             for p in self.in_features:
@@ -496,17 +499,13 @@ class DiffusionDet(nn.Module):
             if self.local_box_enable:
                 self.proposals_feat.append(proposals_l1[i])
                 self.proposals_feat_dis.append(proposals_l2[i])
+            else:
+                print("\n\n[local] proposals_l2 & proposals_l1 are never used.\n")
 
-        print("[local] len of feats:", len(self.feats))
-        print("[local] len of classes_300:", len(self.classes_300))
-        print("[local] classes_300[0].shape:", self.classes_300[0].shape)
-        print("[local] proposals_300[0].shape:", self.proposals_300[0].shape)
-        print("[local] proposals_feat_300[0].shape:", self.proposals_feat_300[0].shape)
-        # print("[local] proposals_feat[0].shape:", self.proposals_feat[0].shape)
-        # print("[local] proposals_feat_dis[0].shape:", self.proposals_feat_dis[0].shape)
+        print("[local] len(proposals_feat_300):", len(self.proposals_feat_300))
 
         if self.local_box_enable:
-            print("[local] local_box_enable", self.local_box_enable)
+            print("[local] local_box_enable:", self.local_box_enable)
             self.head.proposal_feats_local = \
                 [torch.cat(list(self.proposals_feat), dim=0), torch.cat(list(self.proposals_feat_dis), dim=0)]
 
@@ -536,7 +535,7 @@ class DiffusionDet(nn.Module):
         times = torch.linspace(-1, total_timesteps - 1, steps=sampling_timesteps + 1)
         times = list(reversed(times.int().tolist()))
         time_pairs = list(zip(times[:-1], times[1:]))  # [(T-1, T-2), (T-2, T-3), ..., (1, 0), (0, -1)]
-        print("\n\n\n[forward] time_pairs:", time_pairs, "\n\n\n")
+        print("[forward] time_pairs:", time_pairs)
 
         # random init. of predict boxes
         img = torch.randn(shape, device=self.device)
