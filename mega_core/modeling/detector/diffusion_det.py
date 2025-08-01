@@ -318,7 +318,6 @@ class DiffusionDet(nn.Module):
                 During training, it returns a dict[Tensor] which contains the losses.
                 During testing, it returns list[BoxList] contains additional fields
                 like `scores`, `labels` and `mask` (for Mask R-CNN models).
-
         """
         if self.training and targets is None:
             raise ValueError("In training mode, targets should be passed")
@@ -329,63 +328,16 @@ class DiffusionDet(nn.Module):
         print("[forward] ref_l[0].shape", images['ref_l'][0].tensors.shape)
         # print("[forward] ref_g[0].shape", images['ref_g'][0].tensors.shape)
 
-        if self.training:
-            images["cur"] = to_image_list(images["cur"])
-            images["ref_l"] = [to_image_list(image) for image in images["ref_l"]]
-            images["ref_m"] = [to_image_list(image) for image in images["ref_m"]]
-            images["ref_g"] = [to_image_list(image) for image in images["ref_g"]]
+        # Current frame
+        images["cur"] = to_image_list(images["cur"])
+        # Local buffer
+        images["ref_l"] = [to_image_list(image) for image in images["ref_l"]]
+        # Global buffer
+        images["ref_g"] = [to_image_list(image) for image in images["ref_g"]]
 
-            return self._forward_train(images["cur"], images["ref_l"], images["ref_m"], images["ref_g"], targets)
-        else:
-            # Current frame
-            images["cur"] = to_image_list(images["cur"])
-            # Local buffer
-            images["ref_l"] = [to_image_list(image) for image in images["ref_l"]]
-            # Global buffer
-            images["ref_g"] = [to_image_list(image) for image in images["ref_g"]]
-
-            infos = images.copy()
-            infos.pop("cur")
-            return self._forward_test(images["cur"], infos, targets)
-
-    def _forward_train(self, img_cur, imgs_l, imgs_m, imgs_g, targets):
-        targets, targets_g, targets_l = targets
-        targets = targets + targets_l + targets_g
-
-        num_imgs = 1 + len(imgs_l) + len(imgs_g)
-        imgs_all = torch.cat([img_cur.tensors, *[img.tensors for img in imgs_l], *[img.tensors for img in imgs_g]], dim=0)
-        features_dict = self.backbone(imgs_all)
-        features = list()
-        for p in self.in_features:
-            feature = features_dict[p]  # [p][0:1]
-            features.append(feature)
-
-        # DiffusionDet training generates noisy bboxes from GT bboxes
-        h, w = img_cur.image_sizes[0]
-        images_whwh = torch.tensor([w, h, w, h], dtype=torch.float32, device=self.device)
-        targets, x_boxes, noises, t = self.prepare_targets(targets)
-        for tar in targets:
-            h1, w1 = img_cur.tensors.size()[-2:]
-            tar["image_size_xyxy_pred"] = torch.tensor([w1, h1, w1, h1], dtype=torch.float32, device=self.device)
-        t = t.squeeze(-1)
-        x_boxes = x_boxes * images_whwh[None, None, :]
-
-        outputs_class, outputs_coord = self.head(features, x_boxes, t, init_features=None, box_extract=0)
-        output = {'pred_logits': outputs_class[-1], 'pred_boxes': outputs_coord[-1]}
-
-        if self.deep_supervision:
-            output['aux_outputs'] = [{'pred_logits': a, 'pred_boxes': b}
-                                     for a, b in zip(outputs_class[:-1], outputs_coord[:-1])]
-
-        # new_img = view_image_with_boxes(img_cur, outputs_coord[-1])
-
-        targets = targets[:(1 + len(imgs_l))] if self.local_box_enable else targets
-        loss_dict = self.criterion(output, targets)  # [targets[0]])  # for fast training
-        weight_dict = self.criterion.weight_dict
-        for k in loss_dict.keys():
-            if k in weight_dict:
-                loss_dict[k] *= weight_dict[k]
-        return loss_dict
+        infos = images.copy()
+        infos.pop("cur")
+        return self._forward_test(images["cur"], infos, targets)
 
     def _forward_test(self, imgs, infos, targets=None):
         """
@@ -432,7 +384,7 @@ class DiffusionDet(nn.Module):
         # 1. extract features
         if infos["ref_l"] or infos["ref_g"]:
 
-            local_imgs = [img.tensors for img in infos["ref_l"]]
+            local_imgs  = [img.tensors for img in infos["ref_l"]]
             global_imgs = [img.tensors for img in infos["ref_g"]]
             print(f"[forward] Local  Images Len: {len(local_imgs)}")
             print(f"[forward] Global Images Len: {len(global_imgs)}")
@@ -453,34 +405,38 @@ class DiffusionDet(nn.Module):
                 total_feats_split.append(feats)
 
             print(f"[forward] len(total_feats_split): {len(total_feats_split)}")
-            print(f"[forward] total_feats_split[0].shape: {total_feats_split[0].keys()}")
 
-            total_feats, feats_l, feats_g = {}, {}, {}
-            len_l, len_g = len(local_imgs), (global_imgs)
+            feats_l = {}
+            len_l = len(local_imgs)
             for p in self.in_features:
-                total_feats[p] = torch.cat([feats[p] for feats in total_feats_split], dim=0)
-                feats_l[p] = total_feats[p][:len_l]
-                feats_g[p] = total_feats[p][len_l:]
+                feats_l[p] = torch.cat([feats[p] for feats in total_feats_split], dim=0)[:len_l]
 
             classes_list_all, boxes_list_all, proposals_list_all, proposals_list_k1, proposals_list_k2, \
                 boxes_init_list_all = [], [], [], [], [], []
+
             for bi, feats in enumerate(total_feats_split):
                 f = []
                 for p in self.in_features:
                     f.append(feats[p])
 
+                print(f"[forward] f[0]:", f[0].shape)
                 B = len(f[0])
                 h, w = imgs.image_sizes[0]
                 images_whwh = torch.tensor([w, h, w, h], dtype=torch.float32, device=self.device)
+                
+                # Craete an image_whwh tensor for each batch
                 images_whwh_B = images_whwh.unsqueeze(0).expand(B,-1)
 
                 shape_g = (B, self.num_proposals, 4)
                 box_init = torch.randn(shape_g, device=self.device)
                 time_g = 999
+
+                # Fully denoised box for each batch
                 time_cond_g = torch.full((B,), time_g, device=self.device, dtype=torch.long)
 
-                proposal_all, proposal_k1, proposal_k2 = self.model_predictions(f, images_whwh_B, box_init, time_cond_g,
-                                                                              None, clip_x_start=True, box_extract=bi+1)
+                proposal_all, proposal_k1, proposal_k2 = self.model_predictions(
+                    f, images_whwh_B, box_init, time_cond_g, None, clip_x_start=True, box_extract=bi+1
+                )
                 boxes_init_list_all.append(box_init)
                 classes_list_all.append(proposal_all[0])
                 boxes_list_all.append(proposal_all[1])
@@ -488,7 +444,7 @@ class DiffusionDet(nn.Module):
                 proposals_list_k1.append(proposal_k1)
                 proposals_list_k2.append(proposal_k2)
 
-            # concat all extracted data
+            # concat all extracted data for each batch
             boxes_init_t = torch.cat(boxes_init_list_all, dim=0).view(-1, self.num_proposals, 4)
             classes_t = torch.cat(classes_list_all, dim=0).view(-1, self.num_proposals, 30)
             boxes_t = torch.cat(boxes_list_all, dim=0).view(-1, self.num_proposals, 4)
@@ -509,11 +465,14 @@ class DiffusionDet(nn.Module):
             global_feat_new, idx = update_erase_memory(
                 feats_new=proposals_g1.view(-1, self.hidden_dim),
                 feats_mem=self.head.proposal_feats_global[0],
-                target_size=self.mem_management_size_test)
+                target_size=self.mem_management_size_test
+            )
+
             global_feat_dis_new, idx2 = update_erase_memory(
                 feats_new=proposals_g2.view(-1, self.hidden_dim),
                 feats_mem=self.head.proposal_feats_global[1],
-                target_size=150)
+                target_size=150
+            )
             self.head.proposal_feats_global = [global_feat_new, global_feat_dis_new]
 
         # 3. update local mem
@@ -523,6 +482,7 @@ class DiffusionDet(nn.Module):
                        + [len(local_imgs)-1] * (self.all_frame_interval - ((self.key_frame_location - frame_diff) + len(local_imgs)))
         elif infos["frame_category"] == 1:
             fill_idx = range(len(local_imgs))
+
         # fill sampled local features queue
         for i in fill_idx:
             frame_feat = []
@@ -537,8 +497,18 @@ class DiffusionDet(nn.Module):
                 self.proposals_feat.append(proposals_l1[i])
                 self.proposals_feat_dis.append(proposals_l2[i])
 
+        print("[local] len of feats:", len(self.feats))
+        print("[local] len of classes_300:", len(self.classes_300))
+        print("[local] classes_300[0].shape:", self.classes_300[0].shape)
+        print("[local] proposals_300[0].shape:", self.proposals_300[0].shape)
+        print("[local] proposals_feat_300[0].shape:", self.proposals_feat_300[0].shape)
+        # print("[local] proposals_feat[0].shape:", self.proposals_feat[0].shape)
+        # print("[local] proposals_feat_dis[0].shape:", self.proposals_feat_dis[0].shape)
+
         if self.local_box_enable:
-            self.head.proposal_feats_local = [torch.cat(list(self.proposals_feat), dim=0), torch.cat(list(self.proposals_feat_dis), dim=0)]
+            print("[local] local_box_enable", self.local_box_enable)
+            self.head.proposal_feats_local = \
+                [torch.cat(list(self.proposals_feat), dim=0), torch.cat(list(self.proposals_feat_dis), dim=0)]
 
         # get preprocessed current batch feature & queries
         batch = min(self.infer_batch, self.end_id - self.frame_id + 1) # 1  # len(self.feats)
@@ -550,7 +520,6 @@ class DiffusionDet(nn.Module):
         self.head.proposals_feat_cur = [[torch.cat([self.classes_300[i] for i in range(range_start, range_end)], dim=0),
                                         torch.cat([self.proposals_300[i] for i in range(range_start, range_end)], dim=0),
                                         torch.cat([self.proposals_feat_300[i] for i in range(range_start, range_end)], dim=0).unsqueeze(0)]]
-        #feats_cur = self.feats[self.key_frame_location]
 
         # diffusion preparation
         images_whwh = list()
@@ -560,12 +529,14 @@ class DiffusionDet(nn.Module):
         images_whwh = torch.stack(images_whwh)
 
         shape = (batch, self.num_proposals, 4)
-        total_timesteps, sampling_timesteps, eta, objective = self.num_timesteps, self.sampling_timesteps, self.ddim_sampling_eta, self.objective
+        total_timesteps, sampling_timesteps, eta, objective = \
+            self.num_timesteps, self.sampling_timesteps, self.ddim_sampling_eta, self.objective
 
         # [-1, 0, 1, 2, ..., T-1] when sampling_timesteps == total_timesteps
         times = torch.linspace(-1, total_timesteps - 1, steps=sampling_timesteps + 1)
         times = list(reversed(times.int().tolist()))
         time_pairs = list(zip(times[:-1], times[1:]))  # [(T-1, T-2), (T-2, T-3), ..., (1, 0), (0, -1)]
+        print("\n\n\n[forward] time_pairs:", time_pairs, "\n\n\n")
 
         # random init. of predict boxes
         img = torch.randn(shape, device=self.device)
@@ -577,12 +548,16 @@ class DiffusionDet(nn.Module):
         clip_denoised = True
         do_postprocess = False
 
+        # Bir kez calisiyor
         for time, time_next in time_pairs:
+            print("[diffuse] time:", time, "time_next:", time_next, "len(time_pairs):", len(time_pairs))
+            print("[diffuse] self.box_renewal:", self.box_renewal)
             time_cond = torch.full((batch,), time, device=self.device, dtype=torch.long)
             self_cond = x_start if self.self_condition else None
 
-            preds, outputs_class, outputs_coord = self.model_predictions(feats_cur, images_whwh, img, time_cond,
-                                                                         self_cond, clip_x_start=clip_denoised)
+            preds, outputs_class, outputs_coord = self.model_predictions(
+                feats_cur, images_whwh, img, time_cond, self_cond, clip_x_start=clip_denoised
+            )
             pred_noise, x_start = preds.pred_noise, preds.pred_x_start
 
             if self.box_renewal:  # filter
@@ -599,6 +574,9 @@ class DiffusionDet(nn.Module):
                     img = [img[self.head.topk_idx_bool].view(*box_per_image.size())[i, keep_idx[i]] for i in range(batch)]
                 else:
                     img = [img[i, keep_idx[i]] for i in range(batch)]
+
+            # Buradan cikiyoruz zaten
+            # time_next her zaman -1
             if time_next < 0:
                 img = x_start
                 continue
@@ -634,6 +612,7 @@ class DiffusionDet(nn.Module):
 
         # NMS
         if self.use_ensemble and self.sampling_timesteps > 1:
+            print("[forward] use_ensemble:", self.use_ensemble, "sampling_timesteps:", self.sampling_timesteps)
             box_pred_batch = torch.cat(ensemble_coord, dim=1)
             scores_batch = torch.cat(ensemble_score, dim=1)
             labels_batch = torch.cat(ensemble_label, dim=1)
@@ -655,6 +634,7 @@ class DiffusionDet(nn.Module):
                 boxlist.add_field("labels", labels_per_image)
                 results.append(boxlist)
         else:
+            print("[forward] No ensemble")
             output = {'pred_logits': outputs_class[-1], 'pred_boxes': outputs_coord[-1]}
             box_cls = output["pred_logits"]
             box_pred = output["pred_boxes"]
@@ -681,12 +661,17 @@ class DiffusionDet(nn.Module):
                 extract(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape)
         )
 
+    # x: box_init
+    # t: time_cond
     def model_predictions(self, backbone_feats, images_whwh, x, t, x_self_cond=None, clip_x_start=False, box_extract=0):
         # test phase input output coordinates change
         x_boxes = torch.clamp(x, min=-1 * self.scale, max=self.scale)
         x_boxes = ((x_boxes / self.scale) + 1) / 2
         x_boxes = box_cxcywh_to_xyxy(x_boxes)
+        # print("[model_predictions] x_boxes.shape:", x_boxes.shape)
         x_boxes = x_boxes * images_whwh[:, None, :]
+        
+        # Does not run for the first frame
         if box_extract:
             return self.head(backbone_feats, x_boxes, t, None, box_extract)
         else:
@@ -699,10 +684,13 @@ class DiffusionDet(nn.Module):
         x_start = box_xyxy_to_cxcywh(x_start)
         x_start = (x_start * 2 - 1.) * self.scale
         x_start = torch.clamp(x_start, min=-1 * self.scale, max=self.scale)
+
         if self.head.use_topk:
             pred_noise = self.predict_noise_from_start(x[self.head.topk_idx_bool].view(*x_start.size()), t, x_start)
         else:
             pred_noise = self.predict_noise_from_start(x, t, x_start)
+
+        print("[model_predictions] topk:", self.head.use_topk)
         return ModelPrediction(pred_noise, x_start), outputs_class, outputs_coord
 
 
@@ -873,8 +861,13 @@ def update_erase_memory(feats_new=None, feats_mem=None, rois_new=None, rois_mem=
     #  returns target_size updated feats
     assert target_size is not None
 
+    # Merge new features with old ones
     merged_feat_list = [feats_mem, feats_new]
+
+    # Clean none features
     merged_feat_list = [f for f in merged_feat_list if f is not None]
+
+    # Concatenate all features
     merged_feat = torch.cat(merged_feat_list, dim=0)
     if len(merged_feat) <= target_size:
         return merged_feat, torch.arange(len(merged_feat), device=merged_feat.device)

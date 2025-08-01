@@ -272,6 +272,12 @@ class DynamicHead(nn.Module):
 
     def forward(self, features, init_bboxes, t, init_features, box_extract=0):
         # assert t shape (batch_size)
+        print(f"\n\n[head] len(features): {len(features)}, features[0]: {features[0].shape}")
+        print("[head] init_bboxes:", init_bboxes.shape)
+        print("[head] t:", t.shape)
+        if init_features is not None:
+            print("[head] init_features:", init_features.shape)
+
         time = self.time_mlp(t)
 
         inter_class_logits = []
@@ -283,7 +289,7 @@ class DynamicHead(nn.Module):
         num_boxes = bboxes.shape[1]
         key_frame = 0  # self.key_frame
 
-        if self.training or box_extract > 0 or self.sampling_timesteps > 1:
+        if box_extract > 0 or self.sampling_timesteps > 1:
             if init_features is not None:
                 init_features = init_features[None].repeat(1, bs, 1)
                 proposal_features = init_features.clone()
@@ -301,60 +307,29 @@ class DynamicHead(nn.Module):
             # skip 0~2 stage
             class_logits, bboxes, proposal_features = self.proposals_feat_cur.pop()
 
-        if self.training or box_extract > 0:
-            # select top k local box features per frame
+        if box_extract > 0:
             class_logits_max, _ = torch.max(input=class_logits, dim=-1, keepdim=False)
             topk_val, topk_idx = class_logits_max.topk(k=self.top_k[0], dim=-1)
             topk_idx_bool = torch.zeros_like(class_logits_max, dtype=torch.bool)
             topk_idx_bool.scatter_(1, topk_idx, 1)
             topk_idx_bool2 = torch.zeros_like(class_logits_max, dtype=torch.bool)
             topk_idx_bool2.scatter_(1, topk_idx[:, :self.top_k[1]], 1)
-            # for i in range(len(topk_idx_bool)):
-            #    topk_idx_bool[i, topk_idx[i]] = 1
-            if box_extract > 0:
-                proposal_feat_frame = proposal_features.view([-1, num_boxes, dim])
-                return [class_logits, bboxes, proposal_features], \
-                        proposal_feat_frame[topk_idx_bool], proposal_feat_frame[topk_idx_bool2]  # , bboxes[topk_idx_bool].view(bboxes.size(0), k, 4).detach()
+
+            proposal_feat_frame = proposal_features.view([-1, num_boxes, dim])
+            return [class_logits, bboxes, proposal_features], \
+                    proposal_feat_frame[topk_idx_bool], proposal_feat_frame[topk_idx_bool2]  # , bboxes[topk_idx_bool].view(bboxes.size(0), k, 4).detach()
 
         # local attention task
         if self.local_enable or self.global_enable:
             #features_cur = [p[key_frame].unsqueeze(0) for p in features]
             proposal_feat_frame = proposal_features.view([-1, num_boxes, dim])
-            if self.training:
-                local_interval = 3 if self.local_enable else 1
-                if self.local_enable:
-                    local_proposals = proposal_feat_frame[:local_interval]
-                    local_topk_idx_bool = topk_idx_bool[:local_interval]
-                    local_kv_ = local_proposals[local_topk_idx_bool].unsqueeze(1)  # all: proposal_features.permute(1, 0, 2)
-                if self.global_enable:
-                    global_proposals = proposal_feat_frame[local_interval:]
-                    global_topk_idx_bool = topk_idx_bool[local_interval:]
-                    global_kv1_ = global_proposals[global_topk_idx_bool].unsqueeze(1)
-                    #global_topk_idx_bool2 = topk_idx_bool2[local_interval:]
-                    #global_kv2_ = global_proposals[global_topk_idx_bool2].unsqueeze(1)
-                    global_kv_ = [global_kv1_, global_kv1_]
-            else:
-                local_interval = bs
-                local_kv_ = [f.unsqueeze(1) if self.local_enable else None for f in self.proposal_feats_local]
-                global_kv_ = [f.unsqueeze(1) if self.global_enable else None for f in self.proposal_feats_global]
+            local_interval = bs
+            local_kv_ = [f.unsqueeze(1) if self.local_enable else None for f in self.proposal_feats_local]
+            global_kv_ = [f.unsqueeze(1) if self.global_enable else None for f in self.proposal_feats_global]
 
-            if self.training and self.local_enable:
-                query_ = local_proposals.view(local_interval * num_boxes, 1, dim)  # [local_interval * num_boxes, 1, 256]
-                bboxes2 = bboxes[:local_interval]
-                class_logits2 = class_logits[:local_interval]
-                features = [f[:local_interval] for f in features]
-                time = time[:local_interval]
-            elif True:
-                # enhance cur batch features
-                query_ = proposal_features.permute(1, 0, 2)
-                bboxes2 = bboxes
-                class_logits2 = class_logits
-            else:
-                # enhance cur single features
-                query_ = proposal_feat_frame[key_frame].unsqueeze(1)
-                bboxes2 = bboxes[key_frame].unsqueeze(0)  # bboxes[topk_idx_bool].view(pred_bboxes.size(0), k, 4).detach()
-                features = features_cur
-                time = time[key_frame].unsqueeze(0)
+            query_ = proposal_features.permute(1, 0, 2)
+            bboxes2 = bboxes
+            class_logits2 = class_logits
 
             # local box-level attention
             for i in range(len(self.local_attention)):
@@ -408,30 +383,26 @@ class DynamicHead(nn.Module):
                         topk_idx_bool.scatter_(1, topk_idx, 1)
                         topk_idx_bool.scatter_(1, lowest_k_idx, 1)
                         self.topk_idx_bool = topk_idx_bool
+
                         # insert random query
-                        #topk_idx_bool = topk_idx_bool + torch.where(torch.rand(topk_idx_bool.size(0), topk_idx_bool.size(1),
-                        #                                                       device=topk_idx_bool.device) >= 0.2, 0, 1).to(torch.bool)
                         query_ = query_.view(-1, num_boxes, dim)[topk_idx_bool].unsqueeze(1)
                         bboxes2 = bboxes2[topk_idx_bool].view(-1, k_level[head_idx] + low_k, 4)
+
                         attn_ = attn_.view(-1, num_boxes, dim)[topk_idx_bool]
                 proposal_features2 = query_.permute(1, 0, 2)
-                class_logits2, pred_bboxes2, proposal_features2 = rcnn_head_local(features, bboxes2, proposal_features2,
-                                                                                   self.box_pooler, time, attn_)
+                class_logits2, pred_bboxes2, proposal_features2 = rcnn_head_local(
+                    features, bboxes2, proposal_features2, self.box_pooler, time, attn_
+                )
+
                 if self.return_intermediate:
                     inter_class_logits.append(class_logits2)
                     inter_pred_bboxes.append(pred_bboxes2)
                 bboxes2 = pred_bboxes2.detach()
                 query_ = proposal_features2.permute(1, 0, 2)
 
-        if self.return_intermediate and self.training:
-            if self.local_enable:
-                inter_class_logits = [r[:local_interval] for r in inter_class_logits]
-                inter_pred_bboxes = [r[:local_interval] for r in inter_pred_bboxes]
-            return torch.stack(inter_class_logits), torch.stack(inter_pred_bboxes)
-        elif self.local_enable or self.global_enable:
+        if self.local_enable or self.global_enable:
             return class_logits2[None], pred_bboxes2[None]
         else:
-            # for baseline inference
             return class_logits[None], bboxes[None]
 
 # Diffusion RCNNHead
@@ -737,8 +708,11 @@ class SinusoidalPositionEmbeddings(nn.Module):
         embeddings = math.log(10000) / (half_dim - 1)
         embeddings = torch.exp(torch.arange(half_dim, device=device) * -embeddings)
         embeddings = time[:, None] * embeddings[None, :]
+        
+        ### debug
         embeddings = torch.cat((embeddings.sin(), embeddings.cos()), dim=-1)
         return embeddings
+
 class sparse_attn(nn.Module):
     def __init__(self, cfg):
         super().__init__()

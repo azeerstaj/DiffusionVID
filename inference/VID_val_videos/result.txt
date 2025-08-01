@@ -1,4 +1,4 @@
-AP50 | motion=   all = 0.0032
+AP50 | motion=   all = 0.0046
 Category AP:
 airplane        : nan
 antelope        : nan
@@ -14,7 +14,7 @@ elephant        : nan
 fox             : nan
 giant_panda     : nan
 hamster         : nan
-horse           : 0.0032
+horse           : 0.0046
 lion            : nan
 lizard          : nan
 monkey          : nan

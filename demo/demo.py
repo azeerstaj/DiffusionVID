@@ -19,8 +19,8 @@ parser.add_argument(
 )
 parser.add_argument(
     "--visualize-path",
-    default="datasets/ILSVRC2015/Data/VID/val/ILSVRC2015_val_00003001",
-    # default="datasets/ILSVRC2015/Data/VID/snippets/val/ILSVRC2015_val_00003001.mp4",
+    # vdefault="datasets/ILSVRC2015/Data/VID/val/ILSVRC2015_val_00003001",
+    default="datasets/ILSVRC2015/Data/VID/snippets/val/test_detection.mp4",
     help="the folder or a video to visualize.",
 )
 parser.add_argument(

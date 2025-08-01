@@ -4,6 +4,8 @@ from mega_core.modeling.detector.diffusion_det import DiffusionDet
 from mega_core.modeling.detector.diffusion_det import add_diffusiondet_config
 from mega_core.structures.image_list import to_image_list
 
+torch.manual_seed(0)
+
 path = "configs/vid_R_101_DiffusionVID.yaml"
 add_diffusiondet_config(cfg)
 cfg.merge_from_file(path)

@@ -44,7 +44,7 @@ def main():
     parser.add_argument(
         "--ckpt",
         help="The path to the checkpoint for test, default is the latest checkpoint.",
-        default=None,
+        default="/home/baykar/git/DiffusionVID/models/DiffusionVID_R101.pth",
     )
     parser.add_argument(
         "--motion-specific",

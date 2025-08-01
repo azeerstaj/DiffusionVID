@@ -4,6 +4,8 @@
 #     --visualize-path datasets/ILSVRC2015/Data/VID/val/ILSVRC2015_val_00000001 \
 #     --output-folder visualization --output-video
 
+# datasets/ILSVRC2015/Data/VID/snippets/val/video_frames
+
 python demo/demo.py configs/vid_R_101_DiffusionVID.yaml \
     models/DiffusionVID_R101.pth \
     --suffix ".JPEG" \

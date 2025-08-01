@@ -1,0 +1,1 @@
+optimized_model = torch.compile(model, backend="torch_tensorrt", dynamic=False)

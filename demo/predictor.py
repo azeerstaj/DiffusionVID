@@ -569,6 +569,7 @@ class VIDDemo(object):
                     # [IMPORTANT] At the starting frame we pass the global buffer
                     img_refs_g = []
                     if self.cfg.MODEL.VID.MEGA.GLOBAL.ENABLE:
+                        print(f"[run_on_image_folder] global buffer enabled, size: {self.cfg.MODEL.VID.MEGA.GLOBAL.SIZE}")
                         size = self.cfg.MODEL.VID.MEGA.GLOBAL.SIZE if infos["frame_category"] == 0 else 0
                         shuffled_index = np.arange(frame_seg_len)
                         if self.cfg.MODEL.VID.MEGA.GLOBAL.SHUFFLE:
@@ -580,6 +581,8 @@ class VIDDemo(object):
                             img = cv2.imread(img_dir % filename)
                             img = self.perform_transform(img)
                             img_refs_g.append(img)
+
+                    print(f"[run_on_image_folder] len(img_refs_g): {len(img_refs_g)}")
 
                     infos["ref_l"] = img_refs_l
                     infos["ref_g"] = img_refs_g

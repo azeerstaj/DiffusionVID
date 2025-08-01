@@ -122,6 +122,13 @@ def _accumulate_predictions_from_multiple_gpus(predictions_per_gpu):
     predictions = [predictions[i] for i in image_ids]
     return predictions
 
+def select_top_predictions(predictions, threshold=0.5):
+    scores = predictions.get_field("scores")
+    keep = torch.nonzero(scores > threshold).squeeze(1)
+    predictions = predictions[keep]
+    scores = predictions.get_field("scores")
+    _, idx = scores.sort(0, descending=False)   # ascending order in order that higher score boxes drawn later
+    return predictions[idx]
 
 def inference(
         cfg,
@@ -147,6 +154,11 @@ def inference(
     inference_timer = Timer()
     total_timer.tic()
     predictions = compute_on_dataset(model, data_loader, device, bbox_aug, cfg.MODEL.VID.METHOD, inference_timer, cfg.TEST.SEQ_NMS)
+    
+    # A prediction is a list of BoxList objects, one for each image.
+    print("[test_net.py] predictions.keys():", predictions.keys())
+    print("[test_net.py] predictions[0]:", select_top_predictions(predictions[0], threshold=0.5))
+
     # wait for all processes to complete before measuring the time
     synchronize()
     total_time = total_timer.toc()

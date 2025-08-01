@@ -9,10 +9,12 @@ dist/
 
 # pytorch/python/numpy formats
 *.pth
+*.pt
 *.pkl
 *.npy
 *.zip
 *.log
+*.env
 trace*
 
 # ipython/jupyter notebooks
